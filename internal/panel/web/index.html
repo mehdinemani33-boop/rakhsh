@@ -220,7 +220,8 @@ async function tunnels() {
     c.innerHTML = `<div class="link-h">${dot(t.enabled?'up':'unknown')}<b>${t.name||t.id}</b><span class="eng">${t.engine} · ${t.transport||'—'}</span></div>
       <div class="metrics"><span>${t.local_ip||'?'}→${t.peer_ip||'?'}</span><span>کنترل: ${t.ctrl_port}</span><span>${(t.ports||[]).length} پورت</span></div>
       <div class="actions">
-        <button data-a="toggle" data-id="${t.id}">${t.enabled?'خاموش':'روشن'}</button>
+        <button data-a="edit" data-id="${t.id}">ویرایش</button>
+        <button data-a="toggle" data-id="${t.id}" class="ghost">${t.enabled?'خاموش':'روشن'}</button>
         <button data-a="bundle" data-id="${t.id}" class="ghost">باندل</button>
         <button data-a="carrier" data-id="${t.id}" class="ghost">حامل بعدی</button>
         <button data-a="del" data-id="${t.id}" class="danger">حذف</button></div>`;
@@ -230,27 +231,35 @@ async function tunnels() {
     const b = e.target.closest("button"); if(!b) return; const id=b.dataset.id;
     if (b.id==="new") return tunnelForm(engs);
     if (b.id==="apply") return applyForm();
+    if (b.dataset.a==="edit"){ return tunnelForm(engs, (ts||[]).find(x=>x.id===id)); }
     if (b.dataset.a==="toggle"){ await api("/api/tunnel/toggle?id="+id,{method:"POST"}); tunnels(); }
     if (b.dataset.a==="del"){ if(confirm("حذف شود؟")){ await api("/api/tunnel/delete?id="+id,{method:"POST"}); tunnels(); } }
     if (b.dataset.a==="carrier"){ const r=await api("/api/carrier/next?id="+id,{method:"POST"}); alert("حامل: "+(r.engine||r.error)); }
     if (b.dataset.a==="bundle"){ const r=await api("/api/bundle/make?id="+id,{method:"POST"}); prompt("این باندل را روی سرور مقابل بچسبانید:", r.bundle||r.error); }
   };
 }
-function tunnelForm(engs){
-  const v=$("#view");
-  const opts=(engs||[]).map(e=>`<option value="${e.id}" ${e.locked?'disabled':''}>${e.id}${e.locked?' (قفل)':''}</option>`).join("");
-  v.innerHTML=`<h2>تونل جدید</h2><form id="tf" class="card form">
-    <label>نام<input name="name" required></label>
+function tunnelForm(engs, ex){
+  ex = ex || {};
+  const v=$("#view"), ov=["","direct","wss","6to4","4in6"];
+  const opts=(engs||[]).map(e=>`<option value="${e.id}" ${e.locked?'disabled':''} ${e.id===ex.engine?'selected':''}>${e.id}${e.locked?' (قفل)':''}</option>`).join("");
+  const ovopts=ov.map(o=>`<option value="${o}" ${o===(ex.overlay||'')?'selected':''}>${o||'بدون GRE'}</option>`).join("");
+  const portLines=(ex.ports||[]).map(p=>`${p.public}:${p.target_host||'127.0.0.1'}:${p.target_port}`).join('\n');
+  v.innerHTML=`<h2>${ex.id?'ویرایش تونل':'تونل جدید'}</h2><form id="tf" class="card form">
+    <label>نام<input name="name" value="${ex.name||''}" required></label>
     <label>موتور<select name="engine">${opts}</select></label>
-    <label>IP سرور مقابل<input name="peer_ip"></label>
-    <label>پورت کنترل<input name="ctrl_port" type="number" value="7000"></label>
-    <label>ترنسپورت<input name="transport" value="tcp"></label>
-    <label>پوشش GRE<select name="overlay"><option value="">بدون GRE</option><option>direct</option><option>wss</option><option>6to4</option><option>4in6</option></select></label>
-    <label>پورت‌ها (public:host:port,…)<input name="ports" placeholder="8443:127.0.0.1:8443"></label>
-    <div class="rowbar"><button>ذخیره و روشن</button><button type="button" id="rt" class="ghost">تست مسیر</button></div>
+    <label>IP سرور مقابل<input name="peer_ip" value="${ex.peer_ip||''}"></label>
+    <label>پورت کنترل<input name="ctrl_port" type="number" value="${ex.ctrl_port||7000}"></label>
+    <label>ترنسپورت<input name="transport" value="${ex.transport||'tcp'}"></label>
+    <label>پوشش GRE<select name="overlay">${ovopts}</select></label>
+    <label>پورت‌ها — هر خط یکی: <code>public:host:port</code> (برای افزودن یه خط اضافه کن، برای حذف خطشو پاک کن)
+      <textarea name="ports" rows="6" placeholder="8443:127.0.0.1:8443">${portLines}</textarea></label>
+    <div class="rowbar"><button>${ex.id?'ذخیره‌ی تغییرات':'ذخیره و روشن'}</button><button type="button" id="rt" class="ghost">تست مسیر</button></div>
     <div id="rtout"></div></form>`;
-  const build=()=>{const f=$("#tf");const ports=(f.ports.value||"").split(",").filter(Boolean).map((p,i)=>{const[a,b,c]=p.split(":");return{name:"p"+i,public:+a,target_host:b||"127.0.0.1",target_port:+(c||a),proto:"tcp"};});
-    return{name:f.name.value,engine:f.engine.value,peer_ip:f.peer_ip.value,ctrl_port:+f.ctrl_port.value,transport:f.transport.value,overlay:f.overlay.value,ports,enabled:true};};
+  const build=()=>{const f=$("#tf");
+    const ports=(f.ports.value||"").split(/[\n,]/).map(s=>s.trim()).filter(Boolean).map((p,i)=>{const[a,b,c]=p.split(":");return{name:"p"+(+a||i),public:+a,target_host:b||"127.0.0.1",target_port:+(c||a),proto:"tcp"};});
+    const o={name:f.name.value,engine:f.engine.value,peer_ip:f.peer_ip.value,ctrl_port:+f.ctrl_port.value,transport:f.transport.value,overlay:f.overlay.value,ports,enabled:ex.enabled!==false};
+    if(ex.id){o.id=ex.id; o.token=ex.token; o.local_ip=ex.local_ip;}
+    return o;};
   $("#tf").onsubmit=async e=>{e.preventDefault();const r=await api("/api/tunnel/save",{method:"POST",body:JSON.stringify(build())});if(r.warn)alert("هشدار: "+r.warn);tunnels();};
   $("#rt").onclick=async()=>{const r=await api("/api/routetest",{method:"POST",body:JSON.stringify(build())});
     $("#rtout").innerHTML="<h3>نتیجه تست مسیر</h3>"+(r||[]).slice(0,8).map(x=>`<div class="probe">${x.ok?'✅':'❌'} ${x.engine} ${x.transport} — امتیاز ${x.score.toFixed(0)} — ${x.latency_ms>=0?x.latency_ms.toFixed(0)+'ms':'—'}</div>`).join("");};

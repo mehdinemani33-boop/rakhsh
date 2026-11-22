@@ -33,7 +33,14 @@ install_binary(){
   say "Downloading rakhsh ($GOARCH)…"
   if curl -fsSL "$url" -o "$BIN.tmp" 2>/dev/null && [ -s "$BIN.tmp" ]; then
     mv "$BIN.tmp" "$BIN"; chmod +x "$BIN"
-    "$BIN" version >/dev/null 2>&1 && { say "Installed prebuilt binary."; return; }
+    if "$BIN" version >/dev/null 2>&1; then
+      # fetch the latest web UI to disk so the panel is current without a rebuild
+      local raw="https://raw.githubusercontent.com/$OWNER/$REPO/main/internal/panel/web"
+      mkdir -p "$DIR/web/assets"
+      curl -fsSL "$raw/index.html" -o "$DIR/web/index.html" 2>/dev/null || true
+      curl -fsSL "$raw/assets/app.css" -o "$DIR/web/assets/app.css" 2>/dev/null || true
+      say "Installed prebuilt binary."; return
+    fi
   fi
   rm -f "$BIN.tmp"
   warn "No prebuilt binary — building from source."
