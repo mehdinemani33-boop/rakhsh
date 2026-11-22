@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rakhsh · پنل تونل</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800&display=swap">
+<link rel="stylesheet" href="__BASE__/assets/app.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body>
+<div id="app"><div class="center">در حال بارگذاری…</div></div>
+
+<script>
+const BASE = "__BASE__";
+let CSRF = "", ME = {}, POLL = null, CHART = null, HIST = [];
+const $ = (s, r=document) => r.querySelector(s);
+const el = (t, c, h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
+const dot = l => `<span class="dot ${l}"></span>`;
+const fmtB = n => { n=+n||0; const u=["B","KB","MB","GB","TB","PB"]; let i=0; while(n>=1024&&i<u.length-1){n/=1024;i++;} return n.toFixed(i?1:0)+u[i]; };
+const fmtS = n => fmtB(n)+"/s";
+
+async function api(path, opts={}) {
+  opts.headers = Object.assign({ "Content-Type":"application/json" }, opts.headers||{});
+  if (opts.method === "POST") opts.headers["X-CSRF-Token"] = CSRF;
+  const r = await fetch(BASE + path, opts);
+  if (r.status === 401) { stopPoll(); renderLogin(); throw new Error("auth"); }
+  return r.json();
+}
+function stopPoll(){ if(POLL){clearInterval(POLL);POLL=null;} }
+
+async function boot() {
+  try { const me = await api("/api/me"); CSRF = me.csrf; ME = me; renderShell(me); }
+  catch { renderLogin(); }
+}
+
+/* ---------- login ---------- */
+function renderLogin(err) {
+  stopPoll(); document.body.classList.add("login");
+  $("#app").innerHTML = `
+    <form class="card login-card" id="lf">
+      <div class="login-logo">${BOLT}</div>
+      <h1>رخش</h1>
+      <p class="muted">قدرتمندترین پنل تونل</p>
+      <input name="user" placeholder="نام کاربری" autocomplete="username">
+      <input name="pass" type="password" placeholder="رمز عبور" autocomplete="current-password">
+      <input name="totp" placeholder="کد دو مرحله‌ای (اختیاری)">
+      ${err?`<div class="err">${err}</div>`:""}
+      <button>ورود</button>
+    </form>`;
+  $("#lf").onsubmit = async e => {
+    e.preventDefault(); const f = e.target;
+    const res = await (await fetch(BASE+"/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({User:f.user.value,Pass:f.pass.value,TOTP:f.totp.value})})).json();
+    if (res.ok) { CSRF = res.csrf; document.body.classList.remove("login"); boot(); }
+    else renderLogin(res.error || "خطا در ورود");
+  };
+}
+
+const BOLT = `<svg viewBox="0 0 24 24" width="24" height="24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" fill="currentColor"/></svg>`;
+const IC = {
+  dash:'▦', tunnels:'⚡', cluster:'❖', nodes:'⊞', engines:'⚙', diag:'✛', customers:'☗', settings:'⚙'
+};
+
+/* ---------- shell ---------- */
+function renderShell(me) {
+  document.body.classList.remove("login");
+  $("#app").innerHTML = `
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="side-brand"><span class="logo">${BOLT}</span><span class="wordmark">رخش</span></div>
+      <nav class="side-nav">
+        <div class="nav-sec">نمای کلی</div>
+        <a data-tab="dash" class="nav-item active"><b>▦</b> داشبورد</a>
+        <div class="nav-sec">تونل</div>
+        <a data-tab="tunnels" class="nav-item"><b>⚡</b> تونل‌ها</a>
+        <a data-tab="cluster" class="nav-item"><b>❖</b> کلاستر</a>
+        <a data-tab="nodes" class="nav-item"><b>⊞</b> نودها</a>
+        <a data-tab="engines" class="nav-item"><b>⚙</b> موتورها</a>
+        <div class="nav-sec">سیستم</div>
+        <a data-tab="diag" class="nav-item"><b>✛</b> عیب‌یابی</a>
+        <a data-tab="customers" class="nav-item"><b>☗</b> مشتری‌ها</a>
+        <a data-tab="settings" class="nav-item"><b>⚙</b> تنظیمات</a>
+      </nav>
+      <div class="side-foot">
+        <span class="badge ${me.pro?'pro':'free'}">${me.pro?'Pro':'Free'}</span>
+        <span class="role">${me.role||'—'}</span>
+        <a id="logout">خروج</a>
+      </div>
+    </aside>
+    <main class="content">
+      <header class="topbar">
+        <div class="tb-title"><span class="wordmark">رخش</span> <small id="tb-sub">در حال اتصال…</small></div>
+        <div class="tb-actions"><button class="ghost" id="refresh">تازه‌سازی</button></div>
+      </header>
+      <div id="view"></div>
+    </main>
+  </div>`;
+  document.querySelectorAll(".nav-item").forEach(a => a.onclick = () => {
+    document.querySelectorAll(".nav-item").forEach(x=>x.classList.remove("active"));
+    a.classList.add("active"); stopPoll(); TABS[a.dataset.tab]();
+  });
+  $("#logout").onclick = async () => { await api("/api/logout",{method:"POST"}); renderLogin(); };
+  $("#refresh").onclick = () => { const a=$(".nav-item.active"); TABS[a.dataset.tab](); };
+  TABS.dash();
+}
+
+/* ---------- dashboard ---------- */
+const TABS = {
+  async dash() {
+    const v = $("#view");
+    v.innerHTML = `
+      <section class="hero card">
+        <div class="hero-status">
+          <div class="pulse" id="pulse"></div>
+          <div><div class="muted">وضعیت تونل</div><div class="hs-big" id="hs-big">—</div><div class="muted" id="hs-sub"></div></div>
+        </div>
+        <div class="hero-map" id="map"></div>
+        <div class="hero-lat"><div class="muted">تأخیر</div><div class="hl-big" id="hl-big">—</div><div class="pill" id="hl-pill"></div></div>
+      </section>
+      <section class="grid3">
+        <div class="card stat"><div class="muted">دانلود زنده</div><div class="stat-big" id="dl">0 B/s</div><div class="muted" id="total">—</div></div>
+        <div class="card stat"><div class="muted">آپلود زنده</div><div class="stat-big" id="ul">0 B/s</div></div>
+        <div class="card stat"><div class="muted">اتصالات</div><div class="stat-big" id="conns">0</div><div class="muted">تونل‌های فعال</div></div>
+      </section>
+      <section class="card chartbox">
+        <div class="rowbar"><h3>نمودار ترافیک تونل</h3><span class="muted" id="live-dot">● زنده</span></div>
+        <canvas id="chart" height="90"></canvas>
+      </section>`;
+    HIST = [];
+    initChart();
+    await refreshDash();
+    POLL = setInterval(refreshDash, 3000);
+  },
+  tunnels, cluster, nodes, engines, diag, customers, settings
+};
+
+let LAST = null, LAST_T = 0;
+async function refreshDash() {
+  let h; try { h = await api("/api/health"); } catch { return; }
+  const links = h.links || [];
+  const up = links.filter(l=>l.level==="up").length;
+  const n = links.length;
+  $("#tb-sub").textContent = `${ME.role==='iran'?'ایران':'خارج'} ⇄ ${n} تونل · ${overallFa(h.overall)}`;
+  $("#hs-big").textContent = h.overall==="down"?"قطع": h.overall==="degraded"?"نیمه‌سالم":"سالم";
+  $("#hs-sub").textContent = `${up} از ${n} تونل بالاست`;
+  $("#pulse").className = "pulse "+(h.overall||"unknown");
+  const lats = links.filter(l=>l.latency_ms>=0).map(l=>l.latency_ms);
+  const avg = lats.length? lats.reduce((a,b)=>a+b,0)/lats.length : -1;
+  $("#hl-big").textContent = avg>=0? Math.round(avg)+" ms" : "—";
+  $("#hl-pill").textContent = avg<0?"":(avg<80?"عالی":avg<200?"خوب":"کند");
+  $("#hl-pill").className = "pill "+(avg<0?"":(avg<80?"up":avg<200?"degraded":"down"));
+  $("#conns").textContent = up;
+  $("#map").innerHTML = renderMap(links);
+  // rates
+  const rx = links.reduce((a,l)=>a+(+l.rx_bytes||0),0);
+  const tx = links.reduce((a,l)=>a+(+l.tx_bytes||0),0);
+  const now = Date.now();
+  if (LAST){ const dt=(now-LAST_T)/1000||1; const dl=Math.max(0,(rx-LAST.rx)/dt), ul=Math.max(0,(tx-LAST.tx)/dt);
+    $("#dl").textContent=fmtS(dl); $("#ul").textContent=fmtS(ul);
+    pushChart(dl,ul);
+  }
+  $("#total").textContent = "مجموع: ↓"+fmtB(rx)+" ↑"+fmtB(tx);
+  LAST={rx,tx}; LAST_T=now;
+}
+function overallFa(o){return o==="down"?"قطع":o==="degraded"?"نیمه‌سالم":o==="up"?"سالم":"نامشخص";}
+
+function renderMap(links){
+  const W=560,H=260,cx=470,cy=H/2;
+  let s=`<svg viewBox="0 0 ${W} ${H}" width="100%"><defs>
+    <radialGradient id="ir"><stop offset="0%" stop-color="#4f8cff"/><stop offset="100%" stop-color="#2b5bd4"/></radialGradient></defs>`;
+  const col={up:"#2fd27a",degraded:"#f6b53c",down:"#ff5c6a",unknown:"#5b6b80"};
+  if(!links.length){
+    s+=`<text x="${W/2}" y="${H/2}" fill="#6c829b" font-size="13" text-anchor="middle">هنوز تونلی ساخته نشده — از تب «تونل‌ها» بساز</text>`;
+  } else {
+    const n=links.length, gap=Math.min(56,(H-40)/n), y0=cy-(n-1)*gap/2;
+    links.forEach((l,i)=>{
+      const y=y0+i*gap, x=90, c=col[l.level]||col.unknown;
+      s+=`<path d="M${cx} ${cy} C ${cx-120} ${cy}, ${x+200} ${y}, ${x+60} ${y}" fill="none" stroke="${c}" stroke-width="2" stroke-dasharray="4 6" opacity="0.8" class="flow"/>`;
+      s+=`<g><rect x="${x-70}" y="${y-16}" width="200" height="32" rx="9" fill="#141b2b" stroke="#243247"/>
+        <circle cx="${x-56}" cy="${y}" r="4" fill="${c}"/>
+        <text x="${x-44}" y="${y-2}" fill="#eaf1fb" font-size="12">${(l.name||l.tunnel_id).slice(0,16)}</text>
+        <text x="${x-44}" y="${y+11}" fill="#8ea4bd" font-size="10">${l.engine} · ${l.latency_ms>=0?Math.round(l.latency_ms)+'ms':'—'}</text>
+        <text x="${x+124}" y="${y+4}" fill="#8ea4bd" font-size="10" text-anchor="end">↓${fmtB(l.rx_bytes)}</text></g>`;
+    });
+  }
+  // iran hub
+  s+=`<circle cx="${cx}" cy="${cy}" r="30" fill="url(#ir)" opacity="0.25"/>
+     <circle cx="${cx}" cy="${cy}" r="18" fill="url(#ir)"/>
+     <text x="${cx}" y="${cy+36}" fill="#8ea4bd" font-size="11" text-anchor="middle">${ME.role==='iran'?'این سرور':'سرور ایران'}</text></svg>`;
+  return s;
+}
+
+function initChart(){
+  const ctx=$("#chart"); if(!ctx||!window.Chart)return;
+  CHART=new Chart(ctx,{type:"line",data:{labels:[],datasets:[
+    {label:"دانلود",data:[],borderColor:"#4f8cff",backgroundColor:"rgba(79,140,255,.15)",fill:true,tension:.4,pointRadius:0,borderWidth:2},
+    {label:"آپلود",data:[],borderColor:"#8b7bff",backgroundColor:"rgba(139,123,255,.12)",fill:true,tension:.4,pointRadius:0,borderWidth:2}]},
+    options:{responsive:true,animation:false,plugins:{legend:{labels:{color:"#8ea4bd",boxWidth:12}}},
+      scales:{x:{display:false},y:{ticks:{color:"#5f7083",callback:v=>fmtB(v)+"/s"},grid:{color:"#1b2434"}}}}});
+}
+function pushChart(dl,ul){
+  if(!CHART)return; const t=new Date().toLocaleTimeString('fa-IR');
+  HIST.push({dl,ul}); if(HIST.length>40)HIST.shift();
+  CHART.data.labels=HIST.map(()=>""); CHART.data.datasets[0].data=HIST.map(x=>x.dl); CHART.data.datasets[1].data=HIST.map(x=>x.ul);
+  CHART.update();
+}
+
+/* ---------- tunnels ---------- */
+async function tunnels() {
+  const [ts, engs] = await Promise.all([api("/api/tunnels"), api("/api/engines")]);
+  const v = $("#view");
+  v.innerHTML = `<div class="rowbar"><h2>تونل‌ها</h2><button id="new">+ تونل جدید</button><button id="apply" class="ghost">چسباندن باندل</button></div>`;
+  const list = el("div","grid"); v.appendChild(list);
+  if(!ts||!ts.length) list.appendChild(el("div","card muted","هنوز تونلی ساخته نشده."));
+  (ts||[]).forEach(t => {
+    const c = el("div","card link");
+    c.innerHTML = `<div class="link-h">${dot(t.enabled?'up':'unknown')}<b>${t.name||t.id}</b><span class="eng">${t.engine} · ${t.transport||'—'}</span></div>
+      <div class="metrics"><span>${t.local_ip||'?'}→${t.peer_ip||'?'}</span><span>کنترل: ${t.ctrl_port}</span><span>${(t.ports||[]).length} پورت</span></div>
+      <div class="actions">
+        <button data-a="toggle" data-id="${t.id}">${t.enabled?'خاموش':'روشن'}</button>
+        <button data-a="bundle" data-id="${t.id}" class="ghost">باندل</button>
+        <button data-a="carrier" data-id="${t.id}" class="ghost">حامل بعدی</button>
+        <button data-a="del" data-id="${t.id}" class="danger">حذف</button></div>`;
+    list.appendChild(c);
+  });
+  v.onclick = async e => {
+    const b = e.target.closest("button"); if(!b) return; const id=b.dataset.id;
+    if (b.id==="new") return tunnelForm(engs);
+    if (b.id==="apply") return applyForm();
+    if (b.dataset.a==="toggle"){ await api("/api/tunnel/toggle?id="+id,{method:"POST"}); tunnels(); }
+    if (b.dataset.a==="del"){ if(confirm("حذف شود؟")){ await api("/api/tunnel/delete?id="+id,{method:"POST"}); tunnels(); } }
+    if (b.dataset.a==="carrier"){ const r=await api("/api/carrier/next?id="+id,{method:"POST"}); alert("حامل: "+(r.engine||r.error)); }
+    if (b.dataset.a==="bundle"){ const r=await api("/api/bundle/make?id="+id,{method:"POST"}); prompt("این باندل را روی سرور مقابل بچسبانید:", r.bundle||r.error); }
+  };
+}
+function tunnelForm(engs){
+  const v=$("#view");
+  const opts=(engs||[]).map(e=>`<option value="${e.id}" ${e.locked?'disabled':''}>${e.id}${e.locked?' (قفل)':''}</option>`).join("");
+  v.innerHTML=`<h2>تونل جدید</h2><form id="tf" class="card form">
+    <label>نام<input name="name" required></label>
+    <label>موتور<select name="engine">${opts}</select></label>
+    <label>IP سرور مقابل<input name="peer_ip"></label>
+    <label>پورت کنترل<input name="ctrl_port" type="number" value="7000"></label>
+    <label>ترنسپورت<input name="transport" value="tcp"></label>
+    <label>پوشش GRE<select name="overlay"><option value="">بدون GRE</option><option>direct</option><option>wss</option><option>6to4</option><option>4in6</option></select></label>
+    <label>پورت‌ها (public:host:port,…)<input name="ports" placeholder="8443:127.0.0.1:8443"></label>
+    <div class="rowbar"><button>ذخیره و روشن</button><button type="button" id="rt" class="ghost">تست مسیر</button></div>
+    <div id="rtout"></div></form>`;
+  const build=()=>{const f=$("#tf");const ports=(f.ports.value||"").split(",").filter(Boolean).map((p,i)=>{const[a,b,c]=p.split(":");return{name:"p"+i,public:+a,target_host:b||"127.0.0.1",target_port:+(c||a),proto:"tcp"};});
+    return{name:f.name.value,engine:f.engine.value,peer_ip:f.peer_ip.value,ctrl_port:+f.ctrl_port.value,transport:f.transport.value,overlay:f.overlay.value,ports,enabled:true};};
+  $("#tf").onsubmit=async e=>{e.preventDefault();const r=await api("/api/tunnel/save",{method:"POST",body:JSON.stringify(build())});if(r.warn)alert("هشدار: "+r.warn);tunnels();};
+  $("#rt").onclick=async()=>{const r=await api("/api/routetest",{method:"POST",body:JSON.stringify(build())});
+    $("#rtout").innerHTML="<h3>نتیجه تست مسیر</h3>"+(r||[]).slice(0,8).map(x=>`<div class="probe">${x.ok?'✅':'❌'} ${x.engine} ${x.transport} — امتیاز ${x.score.toFixed(0)} — ${x.latency_ms>=0?x.latency_ms.toFixed(0)+'ms':'—'}</div>`).join("");};
+}
+function applyForm(){
+  $("#view").innerHTML=`<h2>چسباندن باندل</h2><form id="af" class="card form"><label>باندل rkh1_…<textarea name="b" rows="4"></textarea></label><button>اعمال و روشن</button></form>`;
+  $("#af").onsubmit=async e=>{e.preventDefault();const r=await api("/api/bundle/apply",{method:"POST",body:JSON.stringify({Bundle:e.target.b.value})});alert(r.ok?"تونل بالا آمد.":("خطا: "+r.error));tunnels();};
+}
+
+/* ---------- cluster ---------- */
+async function cluster(){
+  const v=$("#view"); v.innerHTML=`<h2>کلاستر</h2><div id="dnsbox"></div>
+    <div class="rowbar" style="margin-top:1.4rem"><h3>استخرها — چند سرور خارج پشت یک پورت</h3><button id="np">+ استخر جدید</button></div>`;
+  await renderDNS();
+  const [pools,ts,stats]=await Promise.all([api("/api/pools"),api("/api/tunnels"),api("/api/cluster/stats")]);
+  const g=el("div","grid");v.appendChild(g);
+  if(!pools||!pools.length)g.appendChild(el("div","card muted","کلاستری ساخته نشده."));
+  (pools||[]).forEach(p=>{const c=el("div","card");const live=stats[p.id]?Object.entries(stats[p.id]).map(([k,x])=>k+':'+x).join(' · '):'';
+    c.innerHTML=`<div class="link-h"><b>${p.name}</b><span class="eng">${p.strategy}</span></div>
+      <div class="metrics"><span>پورت: ${p.public}</span><span>${(p.members||[]).length} عضو</span><span>${live}</span></div>
+      <div class="actions"><button data-d="${p.id}" class="danger">حذف</button></div>`;g.appendChild(c);});
+  g.onclick=async e=>{const b=e.target.closest("button[data-d]");if(b){await api("/api/pool/delete?id="+b.dataset.d,{method:"POST"});cluster();}};
+  $("#np").onclick=()=>{v.innerHTML=`<h2>کلاستر جدید</h2><form id="pf" class="card form">
+    <label>نام<input name="name" required></label><label>پورت عمومی<input name="public" type="number" required></label>
+    <label>استراتژی<select name="strategy"><option value="failover">failover</option><option value="balance">balance</option><option value="sticky">sticky</option><option value="least_latency">least_latency</option><option value="least_conn">least_conn</option></select></label>
+    <label>اعضا</label><div class="grid">${(ts||[]).map(t=>`<label class="chk"><input type="checkbox" value="${t.id}"> ${t.name}</label>`).join("")}</div>
+    <button>ذخیره و اجرا</button></form>`;
+    $("#pf").onsubmit=async ev=>{ev.preventDefault();const f=ev.target;const members=[...f.querySelectorAll('input[type=checkbox]:checked')].map(c=>c.value);
+      await api("/api/pool/save",{method:"POST",body:JSON.stringify({name:f.name.value,public:+f.public.value,strategy:f.strategy.value,members})});cluster();};};
+}
+
+/* ---------- DNS switching (hub cluster) ---------- */
+async function renderDNS(){
+  const r = await api("/api/dns/get"); const c = r.config||{}; const st = r.status||{};
+  const box = document.getElementById("dnsbox"); if(!box) return;
+  const hubs = c.hubs||[]; const health = st.health||{};
+  box.innerHTML = `<div class="card link">
+    <div class="link-h">${dot(c.enabled?(st.last_err?'degraded':'up'):'unknown')}<b>جابه‌جایی خودکار DNS</b><span class="eng">${c.enabled?'فعال':'خاموش'}</span></div>
+    <div class="metrics"><span>دامنه: ${c.domain||'—'}</span><span>آخرین sync: ${st.last_sync||'—'}</span>${(st.live_ips&&st.live_ips.length)?`<span>زنده: ${st.live_ips.join(' , ')}</span>`:''}</div>
+    ${st.last_err?`<div class="err" style="margin-top:.5rem">${st.last_err}</div>`:''}
+    <div class="grid" style="margin-top:.8rem">${hubs.map(h=>`<div class="card" style="padding:.7rem"><div class="link-h">${dot(health[h.ip]===false?'down':(health[h.ip]?'up':'unknown'))}<b>${h.name||h.ip}</b><span class="eng">${h.share||50}٪</span></div><div class="metrics"><span>${h.ip}</span><span>چک: ${h.port||c.check_port}</span></div></div>`).join("")||'<div class="muted">هابی اضافه نشده</div>'}</div>
+    <div class="actions"><button id="dnsedit" class="ghost">ویرایش / راه‌اندازی</button></div></div>`;
+  document.getElementById("dnsedit").onclick=()=>dnsForm(c);
+}
+function dnsForm(c){
+  const box=document.getElementById("dnsbox");
+  box.innerHTML=`<form id="dnsf" class="card form">
+    <label class="chk"><input type="checkbox" name="enabled" ${c.enabled?'checked':''}> فعال</label>
+    <label>دامنه (FQDN)<input name="domain" value="${c.domain||''}" placeholder="full.example.com"></label>
+    <label>توکن Cloudflare (Zone→DNS→Edit)<input name="token" type="password" placeholder="${c.token==='set'?'ذخیره شده — خالی بذار که عوض نشه':''}"></label>
+    <label>پورت چک سلامت<input name="check_port" type="number" value="${c.check_port||8080}"></label>
+    <label>فاصله چک (ثانیه)<input name="every_sec" type="number" value="${c.every_sec||10}"></label>
+    <label>Fall (چند بار ناموفق تا حذف)<input name="fall" type="number" value="${c.fall||3}"></label>
+    <label>Rise (چند بار موفق تا برگشت)<input name="rise" type="number" value="${c.rise||3}"></label>
+    <label>هاب‌ها — هر خط: name:ip:share</label>
+    <textarea name="hubs" rows="3" placeholder="iran-1:91.231.144.164:50">${(c.hubs||[]).map(h=>`${h.name||''}:${h.ip}:${h.share||50}`).join('\n')}</textarea>
+    <div class="rowbar"><button>ذخیره</button><button type="button" id="dnstest" class="ghost">تست توکن</button></div>
+    <div id="dnsout" class="muted"></div></form>`;
+  const build=()=>{const f=$("#dnsf");
+    const hubs=(f.hubs.value||'').split('\n').map(l=>l.trim()).filter(Boolean).map(l=>{const p=l.split(':');return{name:p[0],ip:p[1],share:+(p[2]||50),port:+f.check_port.value};});
+    return {enabled:f.enabled.checked,domain:f.domain.value.trim(),token:f.token.value,check_port:+f.check_port.value,every_sec:+f.every_sec.value,fall:+f.fall.value,rise:+f.rise.value,hubs};};
+  $("#dnsf").onsubmit=async e=>{e.preventDefault();await api("/api/dns/save",{method:"POST",body:JSON.stringify(build())});cluster();};
+  $("#dnstest").onclick=async()=>{$("#dnsout").textContent="در حال تست…";const r=await api("/api/dns/test",{method:"POST",body:JSON.stringify(build())});$("#dnsout").textContent=r.ok?("✅ zone: "+r.zone+" | رکوردها: "+((r.records||[]).join(' , ')||'خالی')):("❌ "+r.error);};
+}
+
+/* ---------- nodes ---------- */
+async function nodes(){
+  const n=await api("/api/nodes"); const v=$("#view");
+  v.innerHTML=`<div class="rowbar"><h2>نودها</h2><button id="jc">+ کد پیوستن نود</button></div>`;
+  const g=el("div","grid");v.appendChild(g);
+  if(!n||!n.length)g.appendChild(el("div","card muted","نودی به مرکز نپیوسته."));
+  (n||[]).forEach(x=>{const c=el("div","card");c.innerHTML=`<div class="link-h">${dot('up')}<b>${x.name}</b><span class="eng">${x.role||'—'}${x.core?' · core':''}</span></div>
+    <div class="metrics"><span>${x.addr||''}</span><span>${x.last_seen?new Date(x.last_seen).toLocaleTimeString('fa-IR'):'—'}</span></div>`;g.appendChild(c);});
+  $("#jc").onclick=async()=>{const r=await api("/api/node/joincode",{method:"POST"});prompt("روی سرور تازه اجرا کن:","rakhsh node-join "+(r.code||r.error));};
+}
+
+/* ---------- engines ---------- */
+async function engines(){
+  const e=await api("/api/engines"); const v=$("#view"); v.innerHTML=`<h2>موتورهای تونل</h2>`;
+  const g=el("div","grid");v.appendChild(g);
+  const names={gre_frp:"GRE + FRP",xray:"Xray / Reality",backhaul:"Backhaul",bagher:"باقر (SSH)",spoof:"اسپوف (WireGuard)"};
+  (e||[]).forEach(x=>{const c=el("div","card");c.innerHTML=`<div class="link-h">${dot(x.locked?'down':'up')}<b>${names[x.id]||x.id}</b>${x.locked?'<span class="badge free">قفل</span>':'<span class="badge pro">فعال</span>'}</div>
+    <div class="metrics">${x.transports.map(t=>`<span>${t}</span>`).join("")}</div>`;g.appendChild(c);});
+}
+
+/* ---------- diag ---------- */
+async function diag(){
+  $("#view").innerHTML=`<h2>عیب‌یابی</h2><form id="df" class="card form">
+    <label>IP مقصد<input name="host" placeholder="1.2.3.4"></label><label>پورت<input name="port" type="number" value="443"></label>
+    <div class="rowbar"><button type="button" id="reach" class="ghost">دسترسی‌پذیری</button><button type="button" id="hops" class="ghost">مسیر هاپ</button><button type="button" id="stab" class="ghost">پایداری</button></div>
+    <div id="dout"></div></form>`;
+  const host=()=>$("#df").host.value, port=()=>+$("#df").port.value, out=h=>$("#dout").innerHTML=h;
+  $("#reach").onclick=async()=>{const r=await api("/api/diag/reach",{method:"POST",body:JSON.stringify({Host:host(),Port:port()})});
+    out(`<div class="card"><b>${r.verdict}</b> — ICMP:${r.icmp_ok?'✅':'❌'} پورت:${r.port_ok?'✅':'❌'} تأخیر:${r.latency_ms>=0?r.latency_ms.toFixed(0)+'ms':'—'}</div>`);};
+  $("#hops").onclick=async()=>{const r=await api("/api/diag/hops",{method:"POST",body:JSON.stringify({Host:host()})});
+    out(`<div class="card">`+((r||[]).map(h=>`<div class="probe">${h.n}. ${h.addr} — ${h.ms?h.ms.toFixed(0)+'ms':'*'}</div>`).join("")||'traceroute نصب نیست')+`</div>`);};
+  $("#stab").onclick=async()=>{out('<div class="card muted">در حال نمونه‌گیری…</div>');const r=await api("/api/diag/stability",{method:"POST",body:JSON.stringify({Host:host(),Count:15})});
+    const ok=(r.samples||[]).filter(s=>s.ms>=0);const avg=ok.reduce((a,s)=>a+s.ms,0)/Math.max(1,ok.length);
+    out(`<div class="card"><b>اتلاف ${r.loss_pct.toFixed(0)}%</b> · میانگین ${avg.toFixed(0)}ms<div class="spark">${(r.samples||[]).map(s=>`<i style="height:${s.ms>=0?Math.min(42,s.ms/10+3):42}px;background:${s.ms>=0?'var(--up)':'var(--down)'}"></i>`).join("")}</div></div>`);};
+}
+
+/* ---------- customers ---------- */
+async function customers(){
+  const [cs,ts]=await Promise.all([api("/api/customers"),api("/api/tunnels")]);const v=$("#view");
+  v.innerHTML=`<div class="rowbar"><h2>مشتری‌ها</h2><button id="nc">+ فروش تونل</button></div>`;
+  const g=el("div","grid");v.appendChild(g);
+  if(!cs||!cs.length)g.appendChild(el("div","card muted","فروش تونل با پلن روز/حجم/سرعت و قطع خودکار."));
+  (cs||[]).forEach(c=>{const card=el("div","card");const exp=c.expires_at?new Date(c.expires_at).toLocaleDateString('fa-IR'):'—';
+    card.innerHTML=`<div class="link-h">${dot(c.suspended?'down':'up')}<b>${c.name}</b><span class="eng">${c.suspended?'قطع':'فعال'}</span></div>
+      <div class="metrics"><span>${c.days} روز</span><span>${c.volume_gb||'∞'}GB</span><span>${c.speed_mbit||'∞'}Mb</span><span>انقضا: ${exp}</span></div>
+      <div class="actions"><button data-r="${c.id}">تمدید ۳۰ روز</button><button data-x="${c.id}" class="danger">حذف</button></div>`;g.appendChild(card);});
+  g.onclick=async e=>{const b=e.target.closest("button");if(!b)return;
+    if(b.dataset.r){await api("/api/customer/renew?id="+b.dataset.r+"&days=30",{method:"POST"});customers();}
+    if(b.dataset.x){if(confirm("حذف شود؟")){await api("/api/customer/delete?id="+b.dataset.x,{method:"POST"});customers();}}};
+  $("#nc").onclick=()=>{v.innerHTML=`<h2>فروش تونل</h2><form id="cf" class="card form">
+    <label>نام مشتری<input name="name" required></label><label>تونل<select name="tunnel_id">${(ts||[]).map(t=>`<option value="${t.id}">${t.name}</option>`).join("")}</select></label>
+    <label>مدت (روز)<input name="days" type="number" value="30"></label><label>حجم (GB، ۰=نامحدود)<input name="volume_gb" type="number" value="0"></label>
+    <label>سرعت (Mb، ۰=نامحدود)<input name="speed_mbit" type="number" value="0"></label><button>ثبت</button></form>`;
+    $("#cf").onsubmit=async ev=>{ev.preventDefault();const f=ev.target;await api("/api/customer/save",{method:"POST",body:JSON.stringify({name:f.name.value,tunnel_id:f.tunnel_id.value,days:+f.days.value,volume_gb:+f.volume_gb.value,speed_mbit:+f.speed_mbit.value})});customers();};};
+}
+
+/* ---------- settings ---------- */
+async function settings(){
+  $("#view").innerHTML=`<h2>تنظیمات</h2>
+    <form id="sf" class="card form">
+      <label class="chk"><input type="checkbox" name="autopilot"> Autopilot</label>
+      <label class="chk"><input type="checkbox" name="watchdog" checked> واچ‌داگ</label>
+      <label>کانال آپدیت<select name="update_channel"><option>stable</option><option>dev</option></select></label>
+      <label>وبهوک هشدار<input name="alert_webhook"></label>
+      <label>توکن ربات تلگرام<input name="alert_tg_token"></label>
+      <label>چت‌آیدی تلگرام<input name="alert_tg_chat"></label>
+      <label>لایسنس<input name="license_key"></label><button>ذخیره</button></form>
+    <div class="card"><h3>امنیت و نگهداری</h3>
+      <div class="actions"><button id="tfa" class="ghost">فعال‌سازی ۲ مرحله‌ای</button><button id="bk" class="ghost">بکاپ</button><button id="up" class="ghost">آپدیت</button></div>
+      <div id="sout" class="muted"></div></div>`;
+  $("#sf").onsubmit=async e=>{e.preventDefault();const f=e.target;await api("/api/settings/save",{method:"POST",body:JSON.stringify({autopilot:f.autopilot.checked,watchdog:f.watchdog.checked,update_channel:f.update_channel.value,alert_webhook:f.alert_webhook.value,alert_tg_token:f.alert_tg_token.value,alert_tg_chat:f.alert_tg_chat.value,license_key:f.license_key.value})});$("#sout").textContent="ذخیره شد.";};
+  $("#tfa").onclick=async()=>{const r=await api("/api/2fa/enable",{method:"POST"});prompt("secret برای Google Authenticator:",r.secret);};
+  $("#bk").onclick=async()=>{const p=prompt("رمز بکاپ:");if(p){const r=await api("/api/backup/create",{method:"POST",body:JSON.stringify({Passphrase:p})});$("#sout").textContent=r.file?("بکاپ: "+r.file):("خطا: "+r.error);}};
+  $("#up").onclick=async()=>{$("#sout").textContent="در حال آپدیت…";const r=await api("/api/update/apply",{method:"POST"});$("#sout").textContent=r.version?("نسخه: "+r.version):("خطا: "+r.error);};
+}
+
+boot();
+</script>
+</body>
+</html>

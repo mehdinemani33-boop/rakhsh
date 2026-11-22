@@ -1,0 +1,15 @@
+# build artifacts
+/rakhsh
+rakhsh-linux-*
+*.exe
+dist/
+# local preview / demo (not part of the app)
+demo.html
+rakhsh-panel-preview.html
+/assets/
+# editor / tooling
+.claude/
+.idea/
+.vscode/
+# go
+/vendor/
