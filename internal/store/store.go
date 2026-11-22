@@ -119,6 +119,7 @@ type Customer struct {
 // Settings are panel-wide knobs.
 type Settings struct {
 	PanelSecret   string `json:"panel_secret"`   // random path segment
+	PanelPort     int    `json:"panel_port"`     // HTTP port (0 = default 7777)
 	AdminUser     string `json:"admin_user"`
 	AdminHash     string `json:"admin_hash"`     // argon2id
 	TOTPSecret    string `json:"totp_secret"`    // optional 2FA

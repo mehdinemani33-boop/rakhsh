@@ -98,7 +98,15 @@ read -rp "Pro license key [none]: " LIC || true
 
 install_binary
 install_frp
-"$BIN" setup --role "$RNAME" --user "$AU" ${AP:+--pass "$AP"} ${LIC:+--license "$LIC"}
+
+# pick the panel port: 7777 unless already in use, then the next free one
+PORT=7777
+if ss -tln 2>/dev/null | grep -q ":7777 "; then
+  for p in 8777 9777 7000 7778 8181; do ss -tln 2>/dev/null | grep -q ":$p " || { PORT=$p; break; }; done
+  warn "port 7777 is in use — the panel will run on $PORT instead."
+fi
+
+"$BIN" setup --role "$RNAME" --user "$AU" --port "$PORT" ${AP:+--pass "$AP"} ${LIC:+--license "$LIC"}
 panel_service
 sleep 2
 

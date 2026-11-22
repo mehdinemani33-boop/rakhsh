@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"rakhsh/internal/billing"
@@ -34,6 +35,20 @@ import (
 )
 
 const statePath = "/opt/rakhsh/state.json"
+
+// panelPort is the panel's HTTP port: the RAKHSH_PORT env wins, then the saved
+// setting, else 7777. This lets a server whose 7777 is taken run on another port.
+func panelPort(fromSettings int) int {
+	if v := os.Getenv("RAKHSH_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	if fromSettings > 0 {
+		return fromSettings
+	}
+	return 7777
+}
 
 func randHex(n int) string {
 	b := make([]byte, n)
@@ -90,6 +105,7 @@ func cmdSetup(args []string) {
 	user := fs.String("user", "admin", "admin username")
 	pass := fs.String("pass", "", "admin password (random if empty)")
 	lic := fs.String("license", "", "Pro license key")
+	port := fs.Int("port", 0, "panel HTTP port (0 = 7777)")
 	_ = fs.Parse(args)
 
 	st := mustStore()
@@ -110,6 +126,7 @@ func cmdSetup(args []string) {
 		s.Settings.PanelSecret = secret
 		s.Settings.NodeKey = nodeKey
 		s.Settings.Watchdog = true
+		s.Settings.PanelPort = *port
 		if *lic != "" {
 			s.Settings.LicenseKey = *lic
 		}
@@ -122,7 +139,7 @@ func cmdSetup(args []string) {
 	ip := sysutil.PublicIP()
 	fmt.Println("Rakhsh setup complete.")
 	fmt.Printf("  Role      : %s\n", *role)
-	fmt.Printf("  Panel URL : http://%s:7777/%s\n", ip, secret)
+	fmt.Printf("  Panel URL : http://%s:%d/%s\n", ip, panelPort(*port), secret)
 	fmt.Printf("  Admin     : %s\n", *user)
 	fmt.Printf("  Password  : %s\n", *pass)
 }
@@ -201,8 +218,9 @@ func cmdRun() {
 		}()
 	}
 
-	fmt.Printf("Rakhsh panel on http://%s:7777/%s\n", ip, snap.Settings.PanelSecret)
-	s := &http.Server{Addr: ":7777", Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	pport := panelPort(snap.Settings.PanelPort)
+	fmt.Printf("Rakhsh panel on http://%s:%d/%s\n", ip, pport, snap.Settings.PanelSecret)
+	s := &http.Server{Addr: fmt.Sprintf(":%d", pport), Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := s.ListenAndServe(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -281,7 +299,7 @@ func cmdBundle(args []string) {
 func cmdURL() {
 	st := mustStore()
 	snap := st.Snapshot()
-	fmt.Printf("http://%s:7777/%s\n", sysutil.PublicIP(), snap.Settings.PanelSecret)
+	fmt.Printf("http://%s:%d/%s\n", sysutil.PublicIP(), panelPort(snap.Settings.PanelPort), snap.Settings.PanelSecret)
 }
 
 func cmdNodeJoin(args []string) {
