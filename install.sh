@@ -64,6 +64,8 @@ install_frp(){
 }
 
 panel_service(){
+  # make `rakhsh` a global command
+  ln -sf "$BIN" /usr/local/bin/rakhsh
   cat >/etc/systemd/system/rakhsh-panel.service <<UNIT
 [Unit]
 Description=Rakhsh panel / node
