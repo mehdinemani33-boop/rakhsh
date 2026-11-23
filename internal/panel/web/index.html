@@ -2,20 +2,18 @@
 <html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Rakhsh · پنل تونل</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;800&display=swap">
 <link rel="stylesheet" href="__BASE__/assets/app.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="__BASE__/assets/chart.umd.min.js"></script>
 </head>
 <body>
 <div id="app"><div class="center">در حال بارگذاری…</div></div>
 
 <script>
 const BASE = "__BASE__";
-let CSRF = "", ME = {}, POLL = null, CHART = null, HIST = [];
+let CSRF = "", ME = {}, POLL = null, CHART = null, CHART2 = null, HIST = [], HISTL = [];
+let TUN = {}, SESS = {t:0, ok:0};
 const $ = (s, r=document) => r.querySelector(s);
 const el = (t, c, h) => { const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e; };
 const dot = l => `<span class="dot ${l}"></span>`;
@@ -38,7 +36,7 @@ async function boot() {
 
 /* ---------- login ---------- */
 function renderLogin(err) {
-  stopPoll(); document.body.classList.add("login");
+  stopPoll(); document.body.classList.add("login"); document.body.classList.remove("nav-open");
   $("#app").innerHTML = `
     <form class="card login-card" id="lf">
       <div class="login-logo">${BOLT}</div>
@@ -60,16 +58,15 @@ function renderLogin(err) {
 }
 
 const BOLT = `<svg viewBox="0 0 24 24" width="24" height="24"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" fill="currentColor"/></svg>`;
-const IC = {
-  dash:'▦', tunnels:'⚡', cluster:'❖', nodes:'⊞', engines:'⚙', diag:'✛', customers:'☗', settings:'⚙'
-};
+const HAMB = `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>`;
 
 /* ---------- shell ---------- */
 function renderShell(me) {
   document.body.classList.remove("login");
   $("#app").innerHTML = `
   <div class="shell">
-    <aside class="sidebar">
+    <div class="backdrop" id="backdrop"></div>
+    <aside class="sidebar" id="sidebar">
       <div class="side-brand"><span class="logo">${BOLT}</span><span class="wordmark">رخش</span></div>
       <nav class="side-nav">
         <div class="nav-sec">نمای کلی</div>
@@ -92,45 +89,60 @@ function renderShell(me) {
     </aside>
     <main class="content">
       <header class="topbar">
+        <button class="menu-btn" id="menu" aria-label="منو">${HAMB}</button>
         <div class="tb-title"><span class="wordmark">رخش</span> <small id="tb-sub">در حال اتصال…</small></div>
         <div class="tb-actions"><button class="ghost" id="refresh">تازه‌سازی</button></div>
       </header>
       <div id="view"></div>
     </main>
   </div>`;
+  const closeNav = () => document.body.classList.remove("nav-open");
   document.querySelectorAll(".nav-item").forEach(a => a.onclick = () => {
     document.querySelectorAll(".nav-item").forEach(x=>x.classList.remove("active"));
-    a.classList.add("active"); stopPoll(); TABS[a.dataset.tab]();
+    a.classList.add("active"); stopPoll(); closeNav(); TABS[a.dataset.tab]();
   });
+  $("#menu").onclick = () => document.body.classList.toggle("nav-open");
+  $("#backdrop").onclick = closeNav;
   $("#logout").onclick = async () => { await api("/api/logout",{method:"POST"}); renderLogin(); };
   $("#refresh").onclick = () => { const a=$(".nav-item.active"); TABS[a.dataset.tab](); };
   TABS.dash();
 }
 
-/* ---------- dashboard ---------- */
+/* ---------- dashboard (advanced monitoring) ---------- */
 const TABS = {
   async dash() {
     const v = $("#view");
     v.innerHTML = `
-      <section class="hero card">
-        <div class="hero-status">
-          <div class="pulse" id="pulse"></div>
-          <div><div class="muted">وضعیت تونل</div><div class="hs-big" id="hs-big">—</div><div class="muted" id="hs-sub"></div></div>
-        </div>
-        <div class="hero-map" id="map"></div>
-        <div class="hero-lat"><div class="muted">تأخیر</div><div class="hl-big" id="hl-big">—</div><div class="pill" id="hl-pill"></div></div>
-      </section>
-      <section class="grid3">
-        <div class="card stat"><div class="muted">دانلود زنده</div><div class="stat-big" id="dl">0 B/s</div><div class="muted" id="total">—</div></div>
-        <div class="card stat"><div class="muted">آپلود زنده</div><div class="stat-big" id="ul">0 B/s</div></div>
-        <div class="card stat"><div class="muted">اتصالات</div><div class="stat-big" id="conns">0</div><div class="muted">تونل‌های فعال</div></div>
-      </section>
-      <section class="card chartbox">
-        <div class="rowbar"><h3>نمودار ترافیک تونل</h3><span class="muted" id="live-dot">● زنده</span></div>
-        <canvas id="chart" height="90"></canvas>
-      </section>`;
-    HIST = [];
-    initChart();
+      <div class="dash">
+        <section class="hero card">
+          <div class="hero-status">
+            <div class="pulse" id="pulse"></div>
+            <div><div class="muted">وضعیت کلی</div><div class="hs-big" id="hs-big">—</div><div class="muted" id="hs-sub"></div></div>
+          </div>
+          <div class="hero-map" id="map"></div>
+          <div class="hero-lat"><div class="gauge" id="gauge"></div></div>
+        </section>
+
+        <section class="kpis" id="kpis"></section>
+
+        <section class="charts2">
+          <div class="card chartbox">
+            <div class="rowbar"><h3>ترافیک زنده</h3><span class="live"><i></i>زنده</span></div>
+            <canvas id="chart" height="92"></canvas>
+          </div>
+          <div class="card chartbox">
+            <div class="rowbar"><h3>تأخیر (ms)</h3><span class="muted" id="lat-now">—</span></div>
+            <canvas id="chartl" height="92"></canvas>
+          </div>
+        </section>
+
+        <section class="card monitor">
+          <div class="mhead"><span>تونل</span><span>وضعیت</span><span>تأخیر</span><span>دانلود</span><span>آپلود</span><span>آپتایم</span></div>
+          <div id="mrows"></div>
+        </section>
+      </div>`;
+    HIST = []; HISTL = []; TUN = {}; SESS = {t:0, ok:0}; LAST = null;
+    initCharts();
     await refreshDash();
     POLL = setInterval(refreshDash, 3000);
   },
@@ -143,69 +155,136 @@ async function refreshDash() {
   const links = h.links || [];
   const up = links.filter(l=>l.level==="up").length;
   const n = links.length;
+  const now = Date.now();
+
+  // session uptime
+  SESS.t++; if(h.overall!=="down" && n>0) SESS.ok++;
+  const uptimePct = SESS.t? (SESS.ok/SESS.t*100) : 0;
+
   $("#tb-sub").textContent = `${ME.role==='iran'?'ایران':'خارج'} ⇄ ${n} تونل · ${overallFa(h.overall)}`;
-  $("#hs-big").textContent = h.overall==="down"?"قطع": h.overall==="degraded"?"نیمه‌سالم":"سالم";
-  $("#hs-sub").textContent = `${up} از ${n} تونل بالاست`;
+  $("#hs-big").textContent = h.overall==="down"?"قطع": h.overall==="degraded"?"نیمه‌سالم": n?"سالم":"—";
+  $("#hs-sub").textContent = n? `${up} از ${n} تونل بالاست` : "تونلی فعال نیست";
   $("#pulse").className = "pulse "+(h.overall||"unknown");
+
   const lats = links.filter(l=>l.latency_ms>=0).map(l=>l.latency_ms);
   const avg = lats.length? lats.reduce((a,b)=>a+b,0)/lats.length : -1;
-  $("#hl-big").textContent = avg>=0? Math.round(avg)+" ms" : "—";
-  $("#hl-pill").textContent = avg<0?"":(avg<80?"عالی":avg<200?"خوب":"کند");
-  $("#hl-pill").className = "pill "+(avg<0?"":(avg<80?"up":avg<200?"degraded":"down"));
-  $("#conns").textContent = up;
+  renderGauge(avg);
+  const latNow = $("#lat-now"); if(latNow) latNow.textContent = avg>=0? Math.round(avg)+" ms" : "—";
   $("#map").innerHTML = renderMap(links);
-  // rates
+
+  // aggregate rates
   const rx = links.reduce((a,l)=>a+(+l.rx_bytes||0),0);
   const tx = links.reduce((a,l)=>a+(+l.tx_bytes||0),0);
-  const now = Date.now();
-  if (LAST){ const dt=(now-LAST_T)/1000||1; const dl=Math.max(0,(rx-LAST.rx)/dt), ul=Math.max(0,(tx-LAST.tx)/dt);
-    $("#dl").textContent=fmtS(dl); $("#ul").textContent=fmtS(ul);
-    pushChart(dl,ul);
-  }
-  $("#total").textContent = "مجموع: ↓"+fmtB(rx)+" ↑"+fmtB(tx);
+  let dl=0, ul=0;
+  if (LAST){ const dt=(now-LAST_T)/1000||1; dl=Math.max(0,(rx-LAST.rx)/dt); ul=Math.max(0,(tx-LAST.tx)/dt); pushCharts(dl,ul,avg); }
   LAST={rx,tx}; LAST_T=now;
+
+  // KPI tiles
+  const latCls = avg<0?'':avg<80?'good':avg<200?'warn':'bad';
+  const upCls = uptimePct>=99?'good':uptimePct>=90?'warn':(n?'bad':'');
+  $("#kpis").innerHTML = [
+    kpi("آپتایم نشست", uptimePct.toFixed(n?1:0)+"٪", "از شروع این صفحه", upCls),
+    kpi("تأخیر میانگین", avg>=0?Math.round(avg)+" ms":"—", avg<0?'':avg<80?'عالی':avg<200?'خوب':'کند', latCls),
+    kpi("تونل فعال", up+" / "+n, "بالا / کل", up&&up===n?'good':up?'warn':'bad'),
+    kpi("دانلود زنده", fmtS(dl), "مجموع ↓"+fmtB(rx), ''),
+    kpi("آپلود زنده", fmtS(ul), "مجموع ↑"+fmtB(tx), ''),
+    kpi("کل ترافیک", fmtB(rx+tx), "از ابتدا", ''),
+  ].join("");
+
+  // per-tunnel monitor rows
+  renderMonitor(links, now);
+}
+function kpi(label,val,sub,cls){
+  return `<div class="kpi ${cls||''}"><div class="kl"><span class="kdot"></span>${label}</div><div class="kv">${val}</div><div class="ks">${sub||''}</div></div>`;
 }
 function overallFa(o){return o==="down"?"قطع":o==="degraded"?"نیمه‌سالم":o==="up"?"سالم":"نامشخص";}
 
+function renderGauge(avg){
+  const box=$("#gauge"); if(!box) return;
+  const r=50, c=2*Math.PI*r;
+  const q = avg<0?0:Math.max(.04,Math.min(1,1-Math.min(avg,300)/300));
+  const col = avg<0?'#5b6b80':avg<80?'#2fd27a':avg<200?'#f6b53c':'#ff5c6a';
+  const off = c*(1-q);
+  box.innerHTML = `<svg viewBox="0 0 120 120" width="118" height="118">
+    <circle cx="60" cy="60" r="${r}" fill="none" stroke="#1b2434" stroke-width="10"/>
+    <circle cx="60" cy="60" r="${r}" fill="none" stroke="${col}" stroke-width="10" stroke-linecap="round"
+      stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" style="transition:stroke-dashoffset .5s,stroke .5s"/>
+  </svg><div class="gv"><b>${avg>=0?Math.round(avg):'—'}<small> ms</small></b><small>تأخیر</small></div>`;
+}
+
+function renderMonitor(links, now){
+  const box=$("#mrows"); if(!box) return;
+  if(!links.length){ box.innerHTML = `<div class="mrow"><span class="muted" style="grid-column:1/-1">هنوز تونلی فعال نیست — از تب «تونل‌ها» یکی بساز و روشن کن.</span></div>`; return; }
+  box.innerHTML = links.map(l=>{
+    const id=l.tunnel_id; let s=TUN[id]; if(!s){ s=TUN[id]={lastRx:+l.rx_bytes||0,lastTx:+l.tx_bytes||0,lastT:now,lat:[],dl:0,ul:0}; }
+    const dt=(now-s.lastT)/1000;
+    if(dt>0.3){ s.dl=Math.max(0,((+l.rx_bytes||0)-s.lastRx)/dt); s.ul=Math.max(0,((+l.tx_bytes||0)-s.lastTx)/dt); s.lastRx=+l.rx_bytes||0; s.lastTx=+l.tx_bytes||0; s.lastT=now; }
+    if(l.latency_ms>=0){ s.lat.push(l.latency_ms); if(s.lat.length>22)s.lat.shift(); }
+    const col = l.level==='up'?'var(--up)':l.level==='degraded'?'var(--degraded)':l.level==='down'?'var(--down)':'var(--unknown)';
+    const spark = s.lat.map(ms=>{const hgt=Math.max(2,Math.min(26,ms/10+2));const c2=ms<80?'var(--up)':ms<200?'var(--degraded)':'var(--down)';return `<i style="height:${hgt}px;background:${c2}"></i>`;}).join("")||'<span class="muted" style="font-size:.72rem">—</span>';
+    const since = l.since? uptimeStr(l.since) : '—';
+    return `<div class="mrow">
+      <span class="mname">${dot(l.level)}<span style="min-width:0"><b>${(l.name||id)}</b><small>${l.engine}</small></span></span>
+      <span class="mcell" data-l="وضعیت"><span class="pill ${l.level}">${overallFa(l.level)}</span></span>
+      <span class="mcell mspark-cell" data-l="تأخیر"><span class="mspark">${spark}</span></span>
+      <span class="mcell mnum" data-l="دانلود">${fmtS(s.dl)}</span>
+      <span class="mcell mnum" data-l="آپلود">${fmtS(s.ul)}</span>
+      <span class="mcell mcell-sm mnum" data-l="آپتایم">${since}</span>
+    </div>`;
+  }).join("");
+}
+function uptimeStr(since){
+  const d=Date.now()-new Date(since).getTime(); if(d<0||isNaN(d))return'—';
+  const m=Math.floor(d/60000), h=Math.floor(m/60), dd=Math.floor(h/24);
+  if(dd>0)return dd+"ر "+(h%24)+"س"; if(h>0)return h+"س "+(m%60)+"د"; if(m>0)return m+"د"; return"الان";
+}
+
 function renderMap(links){
-  const W=560,H=260,cx=470,cy=H/2;
+  const W=560,H=240,cx=470,cy=H/2;
   let s=`<svg viewBox="0 0 ${W} ${H}" width="100%"><defs>
     <radialGradient id="ir"><stop offset="0%" stop-color="#4f8cff"/><stop offset="100%" stop-color="#2b5bd4"/></radialGradient></defs>`;
   const col={up:"#2fd27a",degraded:"#f6b53c",down:"#ff5c6a",unknown:"#5b6b80"};
   if(!links.length){
     s+=`<text x="${W/2}" y="${H/2}" fill="#6c829b" font-size="13" text-anchor="middle">هنوز تونلی ساخته نشده — از تب «تونل‌ها» بساز</text>`;
   } else {
-    const n=links.length, gap=Math.min(56,(H-40)/n), y0=cy-(n-1)*gap/2;
+    const n=links.length, gap=Math.min(52,(H-36)/n), y0=cy-(n-1)*gap/2;
     links.forEach((l,i)=>{
       const y=y0+i*gap, x=90, c=col[l.level]||col.unknown;
       s+=`<path d="M${cx} ${cy} C ${cx-120} ${cy}, ${x+200} ${y}, ${x+60} ${y}" fill="none" stroke="${c}" stroke-width="2" stroke-dasharray="4 6" opacity="0.8" class="flow"/>`;
-      s+=`<g><rect x="${x-70}" y="${y-16}" width="200" height="32" rx="9" fill="#141b2b" stroke="#243247"/>
+      s+=`<g><rect x="${x-70}" y="${y-15}" width="205" height="30" rx="9" fill="#141b2b" stroke="#243247"/>
         <circle cx="${x-56}" cy="${y}" r="4" fill="${c}"/>
         <text x="${x-44}" y="${y-2}" fill="#eaf1fb" font-size="12">${(l.name||l.tunnel_id).slice(0,16)}</text>
         <text x="${x-44}" y="${y+11}" fill="#8ea4bd" font-size="10">${l.engine} · ${l.latency_ms>=0?Math.round(l.latency_ms)+'ms':'—'}</text>
-        <text x="${x+124}" y="${y+4}" fill="#8ea4bd" font-size="10" text-anchor="end">↓${fmtB(l.rx_bytes)}</text></g>`;
+        <text x="${x+128}" y="${y+4}" fill="#8ea4bd" font-size="10" text-anchor="end">↓${fmtB(l.rx_bytes)}</text></g>`;
     });
   }
-  // iran hub
   s+=`<circle cx="${cx}" cy="${cy}" r="30" fill="url(#ir)" opacity="0.25"/>
      <circle cx="${cx}" cy="${cy}" r="18" fill="url(#ir)"/>
      <text x="${cx}" y="${cy+36}" fill="#8ea4bd" font-size="11" text-anchor="middle">${ME.role==='iran'?'این سرور':'سرور ایران'}</text></svg>`;
   return s;
 }
 
-function initChart(){
-  const ctx=$("#chart"); if(!ctx||!window.Chart)return;
-  CHART=new Chart(ctx,{type:"line",data:{labels:[],datasets:[
+function initCharts(){
+  if(!window.Chart) return;
+  const mk=(id,ds,yfmt)=>{const ctx=$(id); if(!ctx)return null;
+    return new Chart(ctx,{type:"line",data:{labels:[],datasets:ds},
+      options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{intersect:false,mode:"index"},
+        plugins:{legend:{display:ds.length>1,labels:{color:"#8ea4bd",boxWidth:12,font:{size:11}}},tooltip:{enabled:true}},
+        scales:{x:{display:false},y:{ticks:{color:"#5f7083",font:{size:10},callback:yfmt},grid:{color:"#1b2434"}}}}});
+  };
+  CHART = mk("#chart",[
     {label:"دانلود",data:[],borderColor:"#4f8cff",backgroundColor:"rgba(79,140,255,.15)",fill:true,tension:.4,pointRadius:0,borderWidth:2},
-    {label:"آپلود",data:[],borderColor:"#8b7bff",backgroundColor:"rgba(139,123,255,.12)",fill:true,tension:.4,pointRadius:0,borderWidth:2}]},
-    options:{responsive:true,animation:false,plugins:{legend:{labels:{color:"#8ea4bd",boxWidth:12}}},
-      scales:{x:{display:false},y:{ticks:{color:"#5f7083",callback:v=>fmtB(v)+"/s"},grid:{color:"#1b2434"}}}}});
+    {label:"آپلود",data:[],borderColor:"#8b7bff",backgroundColor:"rgba(139,123,255,.12)",fill:true,tension:.4,pointRadius:0,borderWidth:2}],
+    v=>fmtB(v)+"/s");
+  CHART2 = mk("#chartl",[
+    {label:"تأخیر",data:[],borderColor:"#2bd4d9",backgroundColor:"rgba(43,212,217,.12)",fill:true,tension:.35,pointRadius:0,borderWidth:2}],
+    v=>Math.round(v)+"ms");
 }
-function pushChart(dl,ul){
-  if(!CHART)return; const t=new Date().toLocaleTimeString('fa-IR');
-  HIST.push({dl,ul}); if(HIST.length>40)HIST.shift();
-  CHART.data.labels=HIST.map(()=>""); CHART.data.datasets[0].data=HIST.map(x=>x.dl); CHART.data.datasets[1].data=HIST.map(x=>x.ul);
-  CHART.update();
+function pushCharts(dl,ul,lat){
+  if(CHART){ HIST.push({dl,ul}); if(HIST.length>40)HIST.shift();
+    CHART.data.labels=HIST.map(()=>""); CHART.data.datasets[0].data=HIST.map(x=>x.dl); CHART.data.datasets[1].data=HIST.map(x=>x.ul); CHART.update(); }
+  if(CHART2){ HISTL.push(lat>=0?lat:null); if(HISTL.length>40)HISTL.shift();
+    CHART2.data.labels=HISTL.map(()=>""); CHART2.data.datasets[0].data=HISTL.slice(); CHART2.update(); }
 }
 
 /* ---------- tunnels ---------- */
@@ -401,6 +480,12 @@ async function renderLicense(){
 }
 async function settings(){
   $("#view").innerHTML=`<h2>تنظیمات</h2><div id="licbox"></div>
+    <div class="card" style="margin-top:1rem"><h3>تغییر رمز عبور پنل</h3>
+      <form id="pf" class="form">
+        <label>رمز فعلی<input name="cur" type="password" autocomplete="current-password"></label>
+        <label>رمز جدید<input name="nw" type="password" autocomplete="new-password" placeholder="هر طولی — حتی ۴ رقم/حرف"></label>
+        <div class="rowbar"><button>تغییر رمز</button></div>
+        <div id="pout" class="muted"></div></form></div>
     <form id="sf" class="card form" style="margin-top:1rem">
       <label class="chk"><input type="checkbox" name="autopilot"> Autopilot</label>
       <label class="chk"><input type="checkbox" name="watchdog" checked> واچ‌داگ</label>
@@ -413,6 +498,10 @@ async function settings(){
       <div class="actions"><button id="tfa" class="ghost">فعال‌سازی ۲ مرحله‌ای</button><button id="bk" class="ghost">بکاپ</button><button id="up" class="ghost">آپدیت</button></div>
       <div id="sout" class="muted"></div></div>`;
   renderLicense();
+  $("#pf").onsubmit=async e=>{e.preventDefault();const f=e.target;const out=$("#pout");
+    if(!f.nw.value){out.className="err";out.textContent="رمز جدید را وارد کن.";return;}
+    const r=await api("/api/password/change",{method:"POST",body:JSON.stringify({Current:f.cur.value,New:f.nw.value})});
+    if(r.ok){out.className="okmsg";out.textContent="رمز عوض شد ✅";f.reset();}else{out.className="err";out.textContent="خطا: "+(r.error||'');}};
   $("#sf").onsubmit=async e=>{e.preventDefault();const f=e.target;await api("/api/settings/save",{method:"POST",body:JSON.stringify({autopilot:f.autopilot.checked,watchdog:f.watchdog.checked,update_channel:f.update_channel.value,alert_webhook:f.alert_webhook.value,alert_tg_token:f.alert_tg_token.value,alert_tg_chat:f.alert_tg_chat.value})});$("#sout").textContent="ذخیره شد.";};
   $("#tfa").onclick=async()=>{const r=await api("/api/2fa/enable",{method:"POST"});prompt("secret برای Google Authenticator:",r.secret);};
   $("#bk").onclick=async()=>{const p=prompt("رمز بکاپ:");if(p){const r=await api("/api/backup/create",{method:"POST",body:JSON.stringify({Passphrase:p})});$("#sout").textContent=r.file?("بکاپ: "+r.file):("خطا: "+r.error);}};

@@ -39,6 +39,9 @@ install_binary(){
       mkdir -p "$DIR/web/assets"
       curl -fsSL "$raw/index.html" -o "$DIR/web/index.html" 2>/dev/null || true
       curl -fsSL "$raw/assets/app.css" -o "$DIR/web/assets/app.css" 2>/dev/null || true
+      # self-hosted font + Chart.js so the panel loads fast without any CDN
+      curl -fsSL "$raw/assets/chart.umd.min.js" -o "$DIR/web/assets/chart.umd.min.js" 2>/dev/null || true
+      curl -fsSL "$raw/assets/vazirmatn.woff2" -o "$DIR/web/assets/vazirmatn.woff2" 2>/dev/null || true
       say "Installed prebuilt binary."; return
     fi
   fi

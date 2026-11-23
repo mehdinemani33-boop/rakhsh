@@ -54,6 +54,7 @@ func (s *Server) extraRoutes() {
 
 	// Settings / 2FA
 	s.mux.HandleFunc(b+"/api/settings/save", s.auth(s.csrf(s.hSettingsSave)))
+	s.mux.HandleFunc(b+"/api/password/change", s.auth(s.csrf(s.hPasswordChange)))
 	s.mux.HandleFunc(b+"/api/2fa/enable", s.auth(s.csrf(s.h2FAEnable)))
 	s.mux.HandleFunc(b+"/api/2fa/disable", s.auth(s.csrf(s.h2FADisable)))
 
@@ -279,6 +280,34 @@ func (s *Server) hSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	})
+	writeJSON(w, 200, map[string]string{"ok": "1"})
+}
+
+// hPasswordChange lets the signed-in admin set a new panel password. The
+// current password must verify; the new one may be as short as the operator
+// likes (even 4 characters/digits) — the secret path and session cookie are
+// the real access control.
+func (s *Server) hPasswordChange(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Current, New string }
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "bad request"})
+		return
+	}
+	set := s.st.Snapshot().Settings
+	if !VerifyPassword(in.Current, set.AdminHash) {
+		writeJSON(w, 403, map[string]string{"error": "رمز فعلی اشتباه است"})
+		return
+	}
+	if strings.TrimSpace(in.New) == "" {
+		writeJSON(w, 400, map[string]string{"error": "رمز جدید نمی‌تواند خالی باشد"})
+		return
+	}
+	hash, err := HashPassword(in.New)
+	if err != nil {
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+	_ = s.st.Update(func(st *store.State) error { st.Settings.AdminHash = hash; return nil })
 	writeJSON(w, 200, map[string]string{"ok": "1"})
 }
 
