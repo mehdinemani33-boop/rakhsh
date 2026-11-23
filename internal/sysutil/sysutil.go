@@ -13,6 +13,64 @@ import (
 	"time"
 )
 
+// IfaceBytes returns (rxBytes, txBytes) for one interface from /proc/net/dev,
+// or (0,0) if it is absent.
+func IfaceBytes(name string) (int64, int64) {
+	b, err := os.ReadFile("/proc/net/dev")
+	if err != nil {
+		return 0, 0
+	}
+	for _, ln := range strings.Split(string(b), "\n") {
+		i := strings.IndexByte(ln, ':')
+		if i < 0 {
+			continue
+		}
+		if strings.TrimSpace(ln[:i]) != name {
+			continue
+		}
+		f := strings.Fields(ln[i+1:])
+		if len(f) < 9 {
+			return 0, 0
+		}
+		var rx, tx int64
+		fmt.Sscan(f[0], &rx)
+		fmt.Sscan(f[8], &tx)
+		return rx, tx
+	}
+	return 0, 0
+}
+
+// NetTotals sums rx/tx bytes across real interfaces (skips lo and virtual/
+// bridge/veth/docker devices) — the server's live throughput.
+func NetTotals() (int64, int64) {
+	b, err := os.ReadFile("/proc/net/dev")
+	if err != nil {
+		return 0, 0
+	}
+	var rx, tx int64
+	for _, ln := range strings.Split(string(b), "\n") {
+		i := strings.IndexByte(ln, ':')
+		if i < 0 {
+			continue
+		}
+		name := strings.TrimSpace(ln[:i])
+		if name == "lo" || strings.HasPrefix(name, "veth") || strings.HasPrefix(name, "docker") ||
+			strings.HasPrefix(name, "br-") || strings.HasPrefix(name, "virbr") {
+			continue
+		}
+		f := strings.Fields(ln[i+1:])
+		if len(f) < 9 {
+			continue
+		}
+		var r, t int64
+		fmt.Sscan(f[0], &r)
+		fmt.Sscan(f[8], &t)
+		rx += r
+		tx += t
+	}
+	return rx, tx
+}
+
 // Run executes name+args with a timeout and returns combined output.
 func Run(timeout time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

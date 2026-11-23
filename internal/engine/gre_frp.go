@@ -212,6 +212,8 @@ func (g *GREFRP) Status(t store.Tunnel) Status {
 			st.Up = false
 			st.Detail = "gre peer unreachable"
 		}
+		// Real per-tunnel traffic from the GRE interface counters.
+		st.RxBytes, st.TxBytes = sysutil.IfaceBytes(greName(t))
 	}
 	return st
 }

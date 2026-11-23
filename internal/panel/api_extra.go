@@ -36,6 +36,9 @@ func (s *Server) extraRoutes() {
 	// Node management
 	s.mux.HandleFunc(b+"/api/node/joincode", s.auth(s.hJoinCode))
 
+	// Live server network throughput (real bytes from /proc/net/dev)
+	s.mux.HandleFunc(b+"/api/sysnet", s.auth(s.hSysNet))
+
 	// Cluster
 	s.mux.HandleFunc(b+"/api/cluster/stats", s.auth(s.hClusterStats))
 	s.mux.HandleFunc(b+"/api/pool/save", s.auth(s.csrf(s.hPoolSave)))
@@ -130,6 +133,11 @@ func (s *Server) reconcilePools() {
 	if s.cl != nil {
 		s.cl.Apply(snap.Pools, resolve)
 	}
+}
+
+func (s *Server) hSysNet(w http.ResponseWriter, r *http.Request) {
+	rx, tx := sysutil.NetTotals()
+	writeJSON(w, 200, map[string]any{"rx": rx, "tx": tx, "ts": time.Now().UnixMilli()})
 }
 
 func (s *Server) hClusterStats(w http.ResponseWriter, r *http.Request) {

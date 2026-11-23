@@ -128,11 +128,11 @@ const TABS = {
         <section class="charts2">
           <div class="card chartbox">
             <div class="rowbar"><h3>ترافیک زنده</h3><span class="live"><i></i>زنده</span></div>
-            <canvas id="chart" height="92"></canvas>
+            <canvas id="chart" height="62"></canvas>
           </div>
           <div class="card chartbox">
             <div class="rowbar"><h3>تأخیر (ms)</h3><span class="muted" id="lat-now">—</span></div>
-            <canvas id="chartl" height="92"></canvas>
+            <canvas id="chartl" height="62"></canvas>
           </div>
         </section>
 
@@ -151,7 +151,8 @@ const TABS = {
 
 let LAST = null, LAST_T = 0;
 async function refreshDash() {
-  let h; try { h = await api("/api/health"); } catch { return; }
+  let h, net=null;
+  try { [h, net] = await Promise.all([api("/api/health"), api("/api/sysnet").catch(()=>null)]); } catch { return; }
   const links = h.links || [];
   const up = links.filter(l=>l.level==="up").length;
   const n = links.length;
@@ -172,9 +173,11 @@ async function refreshDash() {
   const latNow = $("#lat-now"); if(latNow) latNow.textContent = avg>=0? Math.round(avg)+" ms" : "—";
   $("#map").innerHTML = renderMap(links);
 
-  // aggregate rates
-  const rx = links.reduce((a,l)=>a+(+l.rx_bytes||0),0);
-  const tx = links.reduce((a,l)=>a+(+l.tx_bytes||0),0);
+  // live throughput: real server counters from /proc/net/dev (fallback to per-tunnel sums)
+  const linkRx = links.reduce((a,l)=>a+(+l.rx_bytes||0),0);
+  const linkTx = links.reduce((a,l)=>a+(+l.tx_bytes||0),0);
+  const rx = net ? (+net.rx||0) : linkRx;
+  const tx = net ? (+net.tx||0) : linkTx;
   let dl=0, ul=0;
   if (LAST){ const dt=(now-LAST_T)/1000||1; dl=Math.max(0,(rx-LAST.rx)/dt); ul=Math.max(0,(tx-LAST.tx)/dt); pushCharts(dl,ul,avg); }
   LAST={rx,tx}; LAST_T=now;
