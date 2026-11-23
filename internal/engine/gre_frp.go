@@ -177,12 +177,20 @@ func (g *GREFRP) Up(role store.Role, t store.Tunnel) error {
 		return err
 	}
 	unit, contents := g.unit(role, t)
-	return sysutil.SystemdInstall(unit, contents)
+	if err := sysutil.SystemdInstall(unit, contents); err != nil {
+		return err
+	}
+	// Count per-tunnel traffic on the Iran edge where the public ports are open.
+	if role == store.RoleIran {
+		sysutil.IptAcctEnsure("rkh-"+t.ID, portNums(t))
+	}
+	return nil
 }
 
 func (g *GREFRP) Down(t store.Tunnel) error {
 	sysutil.SystemdStop("rakhsh-frps-" + t.ID + ".service")
 	sysutil.SystemdStop("rakhsh-frpc-" + t.ID + ".service")
+	sysutil.IptAcctDel("rkh-"+t.ID, portNums(t))
 	g.greDown(t)
 	return nil
 }
@@ -201,19 +209,42 @@ func (g *GREFRP) Probe(t store.Tunnel) Probe {
 
 func (g *GREFRP) Status(t store.Tunnel) Status {
 	unit := "rakhsh-frps-" + t.ID + ".service"
+	foreign := false
 	if _, err := os.Stat("/opt/rakhsh/conf/frpc-" + t.ID + ".toml"); err == nil {
 		unit = "rakhsh-frpc-" + t.ID + ".service"
+		foreign = true
 	}
 	up := sysutil.SystemdActive(unit)
 	st := Status{Up: up}
+	// Latency: ping the GRE inner peer when there's an overlay, else the public
+	// peer IP — so frp-only tunnels still report a real round-trip.
 	if t.GRELocal != "" {
 		st.LatencyMS = sysutil.PingLatency(t.GREPeer)
 		if st.LatencyMS < 0 {
 			st.Up = false
 			st.Detail = "gre peer unreachable"
 		}
-		// Real per-tunnel traffic from the GRE interface counters.
 		st.RxBytes, st.TxBytes = sysutil.IfaceBytes(greName(t))
+	} else if t.PeerIP != "" {
+		st.LatencyMS = sysutil.PingLatency(t.PeerIP)
+	}
+	// Per-tunnel traffic from iptables byte accounting on the Iran (frps) edge,
+	// where the public ports live.
+	if !foreign && len(t.Ports) > 0 {
+		if down, upb := sysutil.IptAcctRead("rkh-" + t.ID); down > 0 || upb > 0 {
+			st.RxBytes, st.TxBytes = down, upb
+		}
 	}
 	return st
+}
+
+// portNums returns the public TCP ports of a tunnel.
+func portNums(t store.Tunnel) []int {
+	out := make([]int, 0, len(t.Ports))
+	for _, p := range t.Ports {
+		if p.Public > 0 {
+			out = append(out, p.Public)
+		}
+	}
+	return out
 }

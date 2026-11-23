@@ -9,9 +9,62 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// IptAcctEnsure installs idempotent byte-counting iptables rules for the given
+// TCP ports, tagged with a comment so they can be read and removed per tunnel.
+// INPUT/dport counts client→server (upload); OUTPUT/sport counts server→client
+// (download). The rules carry no target, so they only count and fall through.
+func IptAcctEnsure(tag string, ports []int) {
+	for _, p := range ports {
+		ps := strconv.Itoa(p)
+		if !RunOK(3*time.Second, "iptables", "-C", "INPUT", "-p", "tcp", "--dport", ps, "-m", "comment", "--comment", tag) {
+			_, _ = Run(3*time.Second, "iptables", "-A", "INPUT", "-p", "tcp", "--dport", ps, "-m", "comment", "--comment", tag)
+		}
+		if !RunOK(3*time.Second, "iptables", "-C", "OUTPUT", "-p", "tcp", "--sport", ps, "-m", "comment", "--comment", tag) {
+			_, _ = Run(3*time.Second, "iptables", "-A", "OUTPUT", "-p", "tcp", "--sport", ps, "-m", "comment", "--comment", tag)
+		}
+	}
+}
+
+// IptAcctRead returns (download, upload) bytes summed from the tagged rules.
+func IptAcctRead(tag string) (down, up int64) {
+	return iptSum("OUTPUT", tag), iptSum("INPUT", tag)
+}
+
+func iptSum(chain, tag string) int64 {
+	out, _ := Run(3*time.Second, "iptables", "-t", "filter", "-nvxL", chain)
+	var sum int64
+	for _, ln := range strings.Split(out, "\n") {
+		if !strings.Contains(ln, tag) {
+			continue
+		}
+		f := strings.Fields(ln)
+		if len(f) < 2 {
+			continue
+		}
+		var b int64
+		fmt.Sscan(f[1], &b)
+		sum += b
+	}
+	return sum
+}
+
+// IptAcctDel removes the tagged counting rules for the given ports.
+func IptAcctDel(tag string, ports []int) {
+	for _, p := range ports {
+		ps := strconv.Itoa(p)
+		for RunOK(2*time.Second, "iptables", "-C", "INPUT", "-p", "tcp", "--dport", ps, "-m", "comment", "--comment", tag) {
+			_, _ = Run(3*time.Second, "iptables", "-D", "INPUT", "-p", "tcp", "--dport", ps, "-m", "comment", "--comment", tag)
+		}
+		for RunOK(2*time.Second, "iptables", "-C", "OUTPUT", "-p", "tcp", "--sport", ps, "-m", "comment", "--comment", tag) {
+			_, _ = Run(3*time.Second, "iptables", "-D", "OUTPUT", "-p", "tcp", "--sport", ps, "-m", "comment", "--comment", tag)
+		}
+	}
+}
 
 // IfaceBytes returns (rxBytes, txBytes) for one interface from /proc/net/dev,
 // or (0,0) if it is absent.
