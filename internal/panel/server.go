@@ -18,6 +18,7 @@ import (
 	"rakhsh/internal/dns"
 	"rakhsh/internal/engine"
 	"rakhsh/internal/health"
+	"rakhsh/internal/license"
 	"rakhsh/internal/store"
 )
 
@@ -169,7 +170,7 @@ func (s *Server) hMe(w http.ResponseWriter, r *http.Request) {
 	snap := s.st.Snapshot()
 	writeJSON(w, 200, map[string]any{
 		"user": r.Header.Get("X-RKH-User"), "csrf": r.Header.Get("X-RKH-CSRF"),
-		"role": snap.Role, "pro": snap.Settings.LicenseKey != "",
+		"role": snap.Role, "pro": license.Valid(snap.Settings.LicenseKey),
 		"overall": s.mon.Overall(), "version": store.Version,
 	})
 }
@@ -188,7 +189,7 @@ func (s *Server) hPools(w http.ResponseWriter, r *http.Request)     { writeJSON(
 func (s *Server) hCustomers(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.st.Snapshot().Customers) }
 
 func (s *Server) hEngines(w http.ResponseWriter, r *http.Request) {
-	licensed := s.st.Snapshot().Settings.LicenseKey != ""
+	licensed := license.Valid(s.st.Snapshot().Settings.LicenseKey)
 	var out []map[string]any
 	for _, e := range engine.All() {
 		out = append(out, map[string]any{
@@ -215,8 +216,8 @@ func (s *Server) hTunnelSave(w http.ResponseWriter, r *http.Request) {
 		t.Token = randToken(18)
 	}
 	snap := s.st.Snapshot()
-	if eng, err := engine.Get(t.Engine); err == nil && eng.Pro() && snap.Settings.LicenseKey == "" {
-		writeJSON(w, 402, map[string]string{"error": "engine requires a Pro license"})
+	if eng, err := engine.Get(t.Engine); err == nil && eng.Pro() && !license.Valid(snap.Settings.LicenseKey) {
+		writeJSON(w, 402, map[string]string{"error": "این موتور لایسنس Pro می‌خواهد"})
 		return
 	}
 	err := s.st.Update(func(st *store.State) error {
@@ -291,7 +292,7 @@ func (s *Server) hTunnelDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) hRouteTest(w http.ResponseWriter, r *http.Request) {
 	var t store.Tunnel
 	_ = json.NewDecoder(r.Body).Decode(&t)
-	licensed := s.st.Snapshot().Settings.LicenseKey != ""
+	licensed := license.Valid(s.st.Snapshot().Settings.LicenseKey)
 	writeJSON(w, 200, engine.RouteTest(t, licensed))
 }
 

@@ -382,20 +382,38 @@ async function customers(){
 }
 
 /* ---------- settings ---------- */
+async function renderLicense(){
+  const st = await api("/api/license/status");
+  const box = $("#licbox"); if(!box) return;
+  const exp = st.expiry ? new Date(st.expiry*1000).toLocaleDateString('fa-IR') : 'دائمی';
+  box.innerHTML = `<div class="card">
+    <div class="link-h">${dot(st.valid?'up':'down')}<b>لایسنس</b><span class="badge ${st.valid?'pro':'free'}">${st.valid?'Pro فعال':'بدون لایسنس'}</span></div>
+    ${st.valid?`<div class="metrics"><span>${st.name||''}</span><span>پلن: ${st.plan||'-'}</span><span>انقضا: ${exp}</span><span>امکانات: ${(st.features||[]).join(' , ')}</span></div>`
+      :`<div class="muted" style="margin:.4rem 0">${st.error?('نامعتبر: '+st.error):'برای باز شدن کلاستر، جابه‌جایی DNS و موتورهای Pro، لایسنس بزن.'}</div>`}
+    <form id="licf" class="form" style="margin-top:.7rem">
+      <label>لایسنس (RKHL-…)<textarea name="lic" rows="2" placeholder="RKHL-..."></textarea></label>
+      <div class="rowbar"><button>ثبت لایسنس</button>${st.valid?'<button type="button" id="licrm" class="danger">حذف</button>':''}</div>
+      <div id="licout" class="muted"></div></form></div>`;
+  $("#licf").onsubmit=async e=>{e.preventDefault();const v=e.target.lic.value.trim();
+    const r=await api("/api/license/set",{method:"POST",body:JSON.stringify({License:v})});
+    if(r.ok){$("#licout").textContent="ثبت شد ✅";setTimeout(()=>{boot();},600);}else $("#licout").textContent="خطا: "+r.error;};
+  if($("#licrm")) $("#licrm").onclick=async()=>{await api("/api/license/set",{method:"POST",body:JSON.stringify({License:""})});boot();};
+}
 async function settings(){
-  $("#view").innerHTML=`<h2>تنظیمات</h2>
-    <form id="sf" class="card form">
+  $("#view").innerHTML=`<h2>تنظیمات</h2><div id="licbox"></div>
+    <form id="sf" class="card form" style="margin-top:1rem">
       <label class="chk"><input type="checkbox" name="autopilot"> Autopilot</label>
       <label class="chk"><input type="checkbox" name="watchdog" checked> واچ‌داگ</label>
       <label>کانال آپدیت<select name="update_channel"><option>stable</option><option>dev</option></select></label>
       <label>وبهوک هشدار<input name="alert_webhook"></label>
       <label>توکن ربات تلگرام<input name="alert_tg_token"></label>
       <label>چت‌آیدی تلگرام<input name="alert_tg_chat"></label>
-      <label>لایسنس<input name="license_key"></label><button>ذخیره</button></form>
-    <div class="card"><h3>امنیت و نگهداری</h3>
+      <button>ذخیره</button></form>
+    <div class="card" style="margin-top:1rem"><h3>امنیت و نگهداری</h3>
       <div class="actions"><button id="tfa" class="ghost">فعال‌سازی ۲ مرحله‌ای</button><button id="bk" class="ghost">بکاپ</button><button id="up" class="ghost">آپدیت</button></div>
       <div id="sout" class="muted"></div></div>`;
-  $("#sf").onsubmit=async e=>{e.preventDefault();const f=e.target;await api("/api/settings/save",{method:"POST",body:JSON.stringify({autopilot:f.autopilot.checked,watchdog:f.watchdog.checked,update_channel:f.update_channel.value,alert_webhook:f.alert_webhook.value,alert_tg_token:f.alert_tg_token.value,alert_tg_chat:f.alert_tg_chat.value,license_key:f.license_key.value})});$("#sout").textContent="ذخیره شد.";};
+  renderLicense();
+  $("#sf").onsubmit=async e=>{e.preventDefault();const f=e.target;await api("/api/settings/save",{method:"POST",body:JSON.stringify({autopilot:f.autopilot.checked,watchdog:f.watchdog.checked,update_channel:f.update_channel.value,alert_webhook:f.alert_webhook.value,alert_tg_token:f.alert_tg_token.value,alert_tg_chat:f.alert_tg_chat.value})});$("#sout").textContent="ذخیره شد.";};
   $("#tfa").onclick=async()=>{const r=await api("/api/2fa/enable",{method:"POST"});prompt("secret برای Google Authenticator:",r.secret);};
   $("#bk").onclick=async()=>{const p=prompt("رمز بکاپ:");if(p){const r=await api("/api/backup/create",{method:"POST",body:JSON.stringify({Passphrase:p})});$("#sout").textContent=r.file?("بکاپ: "+r.file):("خطا: "+r.error);}};
   $("#up").onclick=async()=>{$("#sout").textContent="در حال آپدیت…";const r=await api("/api/update/apply",{method:"POST"});$("#sout").textContent=r.version?("نسخه: "+r.version):("خطا: "+r.error);};

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"rakhsh/internal/billing"
 	"rakhsh/internal/diag"
 	"rakhsh/internal/dns"
+	"rakhsh/internal/license"
 	"rakhsh/internal/node"
 	"rakhsh/internal/store"
 	"rakhsh/internal/sysutil"
@@ -54,6 +56,10 @@ func (s *Server) extraRoutes() {
 	s.mux.HandleFunc(b+"/api/settings/save", s.auth(s.csrf(s.hSettingsSave)))
 	s.mux.HandleFunc(b+"/api/2fa/enable", s.auth(s.csrf(s.h2FAEnable)))
 	s.mux.HandleFunc(b+"/api/2fa/disable", s.auth(s.csrf(s.h2FADisable)))
+
+	// License
+	s.mux.HandleFunc(b+"/api/license/status", s.auth(s.hLicenseStatus))
+	s.mux.HandleFunc(b+"/api/license/set", s.auth(s.csrf(s.hLicenseSet)))
 
 	// DNS switching (hub cluster)
 	s.mux.HandleFunc(b+"/api/dns/get", s.auth(s.hDNSGet))
@@ -134,6 +140,10 @@ func (s *Server) hClusterStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hPoolSave(w http.ResponseWriter, r *http.Request) {
+	if !license.Valid(s.st.Snapshot().Settings.LicenseKey) {
+		writeJSON(w, 402, map[string]string{"error": "کلاستر لایسنس Pro می‌خواهد"})
+		return
+	}
 	var p store.Pool
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "bad pool"})
@@ -335,6 +345,10 @@ func (s *Server) hDNSGet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) hDNSSave(w http.ResponseWriter, r *http.Request) {
+	if !license.Valid(s.st.Snapshot().Settings.LicenseKey) {
+		writeJSON(w, 402, map[string]string{"error": "جابه‌جایی DNS لایسنس Pro می‌خواهد"})
+		return
+	}
 	var in dns.Config
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeJSON(w, 400, map[string]string{"error": "bad config"})
@@ -378,6 +392,29 @@ func (s *Server) hDNSTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "zone": zone, "records": ips})
+}
+
+// --- license ----------------------------------------------------------------
+
+func (s *Server) hLicenseStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, 200, license.Describe(s.st.Snapshot().Settings.LicenseKey))
+}
+
+func (s *Server) hLicenseSet(w http.ResponseWriter, r *http.Request) {
+	var in struct{ License string }
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, 400, map[string]string{"error": "bad request"})
+		return
+	}
+	key := strings.TrimSpace(in.License)
+	if key != "" {
+		if _, err := license.Verify(key); err != nil {
+			writeJSON(w, 400, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+	}
+	_ = s.st.Update(func(st *store.State) error { st.Settings.LicenseKey = key; return nil })
+	writeJSON(w, 200, map[string]any{"ok": true, "status": license.Describe(key)})
 }
 
 // goArch returns amd64/arm64 for update downloads.
