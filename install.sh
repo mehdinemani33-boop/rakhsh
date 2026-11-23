@@ -63,6 +63,27 @@ install_frp(){
   cp "$t"/frp_*/frps "$t"/frp_*/frpc "$DIR/frp/"; chmod +x "$DIR/frp/frps" "$DIR/frp/frpc"; rm -rf "$t"
 }
 
+# ---- Pro-engine binaries: Xray and Backhaul ----
+install_engines(){
+  if [ ! -x "$DIR/xray/xray" ]; then
+    say "Fetching Xray…"
+    local z="Xray-linux-64.zip"; [ "$GOARCH" = arm64 ] && z="Xray-linux-arm64-v8a.zip"
+    local t; t=$(mktemp -d)
+    if curl -fsSL "https://github.com/XTLS/Xray-core/releases/latest/download/$z" -o "$t/x.zip" 2>/dev/null; then
+      unzip -o "$t/x.zip" xray -d "$DIR/xray" >/dev/null 2>&1 && chmod +x "$DIR/xray/xray"
+    else warn "Xray download failed; the Xray engine stays inactive."; fi
+    rm -rf "$t"
+  fi
+  if [ ! -x "$DIR/backhaul/backhaul" ]; then
+    say "Fetching Backhaul…"
+    local t; t=$(mktemp -d)
+    if curl -fsSL "https://github.com/Musixal/Backhaul/releases/latest/download/backhaul_linux_${GOARCH}.tar.gz" -o "$t/b.tgz" 2>/dev/null; then
+      tar xzf "$t/b.tgz" -C "$DIR/backhaul" backhaul 2>/dev/null && chmod +x "$DIR/backhaul/backhaul"
+    else warn "Backhaul download failed; the Backhaul engine stays inactive."; fi
+    rm -rf "$t"
+  fi
+}
+
 panel_service(){
   # make `rakhsh` a global command
   ln -sf "$BIN" /usr/local/bin/rakhsh
@@ -98,6 +119,7 @@ read -rp "Pro license key [none]: " LIC || true
 
 install_binary
 install_frp
+install_engines
 
 # pick the panel port: 7777 unless already in use, then the next free one
 PORT=7777
